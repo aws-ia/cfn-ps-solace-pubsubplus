@@ -1,0 +1,876 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to deploy Solace PubSub+ HA Event Brokers on
+  AWS. (qs-1nju7g5r0)
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: PubSub+ Event Broker Configuration
+        Parameters:
+          - SolaceDockerImage
+          - AdminPassword
+          - MaxClientConnections
+          - MaxQueueMessages
+          - WorkerNodeInstanceType
+          - WorkerNodeStorage
+          - WorkerNodeStorageType
+          - MonitorNodeInstanceType
+          - ContainerLoggingFormat
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VPCID
+          - VPCCIDR
+          - VPCAccessOnly
+          - NumberOfAZs
+          - UsePrivateSubnets
+          - PublicSubnetIDs
+          - PrivateSubnetIDs
+          - SSHSecurityGroupID
+          - RemoteAccessCIDR
+      - Label:
+          default: Common Amazon EC2 Configuration
+        Parameters:
+          - KeyPairName
+          - BootDiskSize
+      - Label:
+          default: AWS Quick Start Configuration
+        Parameters:
+          - QSS3BucketName
+          - QSS3BucketRegion
+          - QSS3KeyPrefix
+    ParameterLabels:
+      SolaceDockerImage:
+        default: PubSub+ Docker image reference
+      AdminPassword:
+        default: Password to access PubSub+ admin console and SEMP
+      ContainerLoggingFormat:
+        default: Container logging format
+      NumberOfAZs:
+        default: Number of Availability Zones
+      BootDiskSize:
+        default: Boot Disk Capacity (GiB)
+      MaxClientConnections:
+        default: Maximum Number of Client Connections
+      MaxQueueMessages:
+        default: Maximum Number of Queue Messages
+      WorkerNodeInstanceType:
+        default: Message Routing Node Instance Type
+      WorkerNodeStorage:
+        default: Persistent Storage
+      WorkerNodeStorageType:
+        default: Persistent Storage Type
+      MonitorNodeInstanceType:
+        default: Monitor Node Instance Type
+      KeyPairName:
+        default: Key Pair Name
+      RemoteAccessCIDR:
+        default: Allowed External Access CIDR
+      SSHSecurityGroupID:
+        default: Security group allowed to access console SSH. Ignored if not using private subnets.
+      UsePrivateSubnets:
+        default: Use private subnets
+      VPCAccessOnly:
+        default: VPC internal access only
+      VPCID:
+        default: VPC ID
+      VPCCIDR:
+        default: VPC CIDR
+      PrivateSubnetIDs:
+        default: Private Subnet IDs
+      PublicSubnetIDs:
+        default: Public Subnet IDs
+      QSS3BucketName:
+        default: Quick Start S3 Bucket Name
+      QSS3BucketRegion:
+        default: Quick Start S3 bucket region
+      QSS3KeyPrefix:
+        default: Quick Start S3 Key Prefix
+  cfn-lint:
+    config:
+      ignore_checks: [E1017]
+Parameters:
+  SolaceDockerImage:
+    Description: >-
+      Solace PubSub+ event broker Docker image reference: a Docker registry name
+      with optional tag or a download URL. The download URL can be obtained from http://dev.solace.com/downloads/
+      or it can be a url to an image in a registry or a url to a tar.gz image on a web server
+    Default: solace/solace-pubsub-standard:latest
+    Type: String
+  AdminPassword:
+    Description: Password to allow Solace admin access to configure the event broker
+      instances
+    Type: String
+    NoEcho: 'True'
+  ContainerLoggingFormat:
+    AllowedValues:
+      - graylog
+      - legacy
+      - raw
+      - rfc5424
+    ConstraintDescription: Must be a valid container logging format.
+    Default: graylog
+    Description: PubSub+ event broker logging format in CloudWatch
+    Type: String
+  NumberOfAZs:
+    ConstraintDescription: Valid numbers are 3 or 2
+    Default: '3'
+    Description: Number of availability zones, based on availability in the target region, valid numbers are 3 or 2. 3 means each node in own AZ, 2 puts monitor and backup
+      in one AZ.
+    AllowedValues:
+      - '2'
+      - '3'
+    Type: Number
+  BootDiskSize:
+    ConstraintDescription: Deployment supports 8 to 128 GB for boot volumes
+    Default: '24'
+    Description: Allocated EBS storage for boot disk
+    MaxValue: '128'
+    MinValue: '8'
+    Type: Number
+  MaxClientConnections:
+    AllowedValues:
+      - '100'
+      - '1000'
+      - '10000'
+      - '100000'
+      - '200000'
+    ConstraintDescription: Must be a valid value from the list.
+    Default: '100'
+    Description: 'Broker system scaling: the maximum supported number of client connections'
+    Type: String
+  MaxQueueMessages:
+    AllowedValues:
+      - '100'
+      - '240'
+      - '3000'
+    ConstraintDescription: Must be a valid EC2 instance type.
+    Default: '100'
+    Description: 'Broker system scaling: the maximum number of queue messages, in millions'
+    Type: String
+  WorkerNodeInstanceType:
+    AllowedValues:
+      - t2.small
+      - t2.medium
+      - t2.large
+      - t2.xlarge
+      - t2.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+    ConstraintDescription: Must be a valid EC2 instance type.
+    Default: m4.large
+    Description: 'Instance Type for PubSub+ event broker message routing nodes. Important: ensure adequate CPU and Memory resources
+      are available to support the selected system scaling parameters. For requirements check https://docs.solace.com/. 
+      Also make sure that your region supports the selected instance type before continuing.'
+    Type: String
+  WorkerNodeStorage:
+    ConstraintDescription: No more than 640 GiB per device.
+    Default: '0'
+    Description: Allocated EBS storage for each block device (in GiB); 0 indicates
+      ephemeral storage only. Non-zero will cause a new io1 disk creation for message-spool
+      which will NOT be deleted on stack termination
+    AllowedValues:
+      - '0'
+      - '20'
+      - '40'
+      - '80'
+      - '160'
+      - '320'
+      - '640'
+    Type: Number
+  WorkerNodeStorageType:
+    Default: 'gp2'
+    Description: Storage volume type provided by Amazon EBS. "io1" is recommended for Production environments (better performance, more expensive)
+      and is required for large storage size.
+    AllowedValues:
+      - 'gp2'
+      - 'io1'
+    Type: String
+  KeyPairName:
+    Description: Name of an existing EC2 key pair within the AWS region; all instances
+      will launch with this key pair
+    Type: AWS::EC2::KeyPair::KeyName
+  UsePrivateSubnets:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Whether to deploy broker nodes into Private Subnets.
+    Type: String
+  VPCAccessOnly:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: Whether broker nodes and services are only exposed internally to the VPC. Only applicable if private subnets used.
+    Type: String
+  RemoteAccessCIDR:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/x
+    Description: Allowed CIDR block for access to broker services
+    Type: String
+  MonitorNodeInstanceType:
+    AllowedValues:
+      - t2.small
+      - t2.medium
+      - m4.large
+      - m5.large
+    ConstraintDescription: Must be a valid EC2 instance type.
+    Default: t2.medium
+    Description: 'Instance Type for PubSub+ event broker monitoring node. For requirements check https://docs.solace.com/. Note: Make
+      sure that your region supports the selected instance type before continuing'
+    Type: String
+  SSHSecurityGroupID:
+    Description: 'ID of the SSH Security Group (e.g., sg-7f16e910).  Note: This will
+      be ignored if ''Use private subnets'' is set to ''false'''
+    Type: String
+  PrivateSubnetIDs:
+    Description: >-
+      Comma separated list of VPC private subnet IDs for the cluster deployment (e.g.
+      subnet-4b8d329f,subnet-bd73afc8); VPC must exist with proper configuration for
+      Solace cluster access. Note: This will be ignored if 'Use private subnets' is
+      set to 'false'
+    Type: List<AWS::EC2::Subnet::Id>
+  PublicSubnetIDs:
+    Description: Comma separated list of VPC public subnet IDs for the cluster deployment
+      (e.g. subnet-4b8d329f,subnet-bd73afc8); VPC must exist with proper configuration
+      for Solace cluster access.
+      IGNORED if 'VPC access only' AND  'use private subnets' both true but even in this case must provide at least one item
+    Type: List<AWS::EC2::Subnet::Id>
+  VPCID:
+    Description: ID of the VPC (e.g. vpc-0343606e)
+    Type: AWS::EC2::VPC::Id
+  VPCCIDR:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Private VPC CIDR block parameter must be in the form x.x.x.x/x
+    Description: The CIDR block configured for the VPC
+    Default: '0.0.0.0/0'
+    Type: String
+  QSS3BucketName:
+    AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
+    ConstraintDescription: Quick Start bucket name can include numbers, lowercase
+      letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen
+      (-).
+    Default: aws-ia-us-east-1
+    Description: S3 bucket name for the Quick Start assets. Quick Start bucket name
+      can include numbers, lowercase letters, uppercase letters, and hyphens (-).
+      It cannot start or end with a hyphen (-).
+    Type: String
+  QSS3BucketRegion:
+    Default: 'us-east-1'
+    Description: 'The AWS Region where the Quick Start S3 bucket (QSS3BucketName) is hosted. When using your own bucket, you must specify this value.'
+    Type: String
+  QSS3KeyPrefix:
+    AllowedPattern: ^[0-9a-zA-Z-/]*$
+    ConstraintDescription: Quick Start key prefix can include numbers, lowercase letters,
+      uppercase letters, hyphens (-), and forward slash (/).
+    Default: cfn-ps-solace-pubsub/
+    Description: S3 key prefix for the Quick Start assets. Quick Start key prefix
+      can include numbers, lowercase letters, uppercase letters, hyphens (-), and
+      forward slash (/).
+    Type: String
+Conditions:
+  EnableWaitConditions: !Equals
+    - '1'
+    - '1'
+  Use3AZs: !Equals
+    - !Ref 'NumberOfAZs'
+    - '3'
+  UsePrivateSubnetsCondition: !Equals
+    - !Ref 'UsePrivateSubnets'
+    - 'true'
+  VPCAccessOnlyCondition: !Equals
+    - !Ref 'VPCAccessOnly'
+    - 'true'
+  UsingDefaultBucket: !Equals [!Ref QSS3BucketName, 'aws-ia-us-east-1']
+Resources:
+  EventBrokerPrimaryStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        !Sub
+          - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/nodecreate.template.yaml'
+          - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      Parameters:
+        SolaceDockerImage: !Ref 'SolaceDockerImage'
+        AdminPassword: !Ref 'AdminPassword'
+        ContainerLoggingFormat: !Ref 'ContainerLoggingFormat'
+        BootDiskSize: !Ref 'BootDiskSize'
+        ClusterInfoHandle: !Ref 'ClusterInfoHandle'
+        KeyPairName: !Ref 'KeyPairName'
+        NodeDesignation: event-broker-primary
+        MaxClientConnections: !Ref 'MaxClientConnections'
+        MaxQueueMessages: !Ref 'MaxQueueMessages'
+        NodeInstanceType: !Ref 'WorkerNodeInstanceType'
+        NodeSecurityGroup: !Join
+          - ','
+          - - !Ref 'EventBrokerSecurityGroup'
+            - !Ref 'SolaceInternalSecurityGroup'
+            - !Ref 'BrokerMemberNodesSecurityGroup'
+            - !Ref 'RemoteMgmtSecurityGroup'
+        ParentStackName: !Ref 'AWS::StackName'
+        PersistentStorage: !Ref 'WorkerNodeStorage'
+        PersistentStorageType: !Ref 'WorkerNodeStorageType'
+        QSS3BucketName: !Ref 'QSS3BucketName'
+        QSS3BucketRegion: !Ref 'QSS3BucketRegion'
+        QSS3KeyPrefix: !Ref 'QSS3KeyPrefix'
+        AssociatePublicIP:  !If [VPCAccessOnlyCondition, 'false', 'true']
+        SubnetID: !Select
+          - 0
+          - !If
+            - UsePrivateSubnetsCondition
+            - !Ref 'PrivateSubnetIDs'
+            - !Ref 'PublicSubnetIDs'
+  EventBrokerBackupStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        !Sub
+          - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/nodecreate.template.yaml'
+          - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      Parameters:
+        SolaceDockerImage: !Ref 'SolaceDockerImage'
+        AdminPassword: !Ref 'AdminPassword'
+        ContainerLoggingFormat: !Ref 'ContainerLoggingFormat'
+        BootDiskSize: !Ref 'BootDiskSize'
+        ClusterInfoHandle: !Ref 'ClusterInfoHandle'
+        KeyPairName: !Ref 'KeyPairName'
+        NodeDesignation: event-broker-backup
+        MaxClientConnections: !Ref 'MaxClientConnections'
+        MaxQueueMessages: !Ref 'MaxQueueMessages'
+        NodeInstanceType: !Ref 'WorkerNodeInstanceType'
+        NodeSecurityGroup: !Join
+          - ','
+          - - !Ref 'EventBrokerSecurityGroup'
+            - !Ref 'SolaceInternalSecurityGroup'
+            - !Ref 'BrokerMemberNodesSecurityGroup'
+            - !Ref 'RemoteMgmtSecurityGroup'
+        ParentStackName: !Ref 'AWS::StackName'
+        PersistentStorage: !Ref 'WorkerNodeStorage'
+        PersistentStorageType: !Ref 'WorkerNodeStorageType'
+        QSS3BucketName: !Ref 'QSS3BucketName'
+        QSS3BucketRegion: !Ref 'QSS3BucketRegion'
+        QSS3KeyPrefix: !Ref 'QSS3KeyPrefix'
+        AssociatePublicIP:  !If [VPCAccessOnlyCondition, 'false', 'true']
+        SubnetID: !Select
+          - 1
+          - !If
+            - UsePrivateSubnetsCondition
+            - !Ref 'PrivateSubnetIDs'
+            - !Ref 'PublicSubnetIDs'
+  MonitorStack:
+    Type: AWS::CloudFormation::Stack
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E1017
+    Properties:
+      TemplateURL:
+        !Sub
+          - 'https://${S3Bucket}.s3.${S3Region}.${AWS::URLSuffix}/${QSS3KeyPrefix}templates/nodecreate.template.yaml'
+          - S3Region: !If [UsingDefaultBucket, !Ref 'AWS::Region', !Ref QSS3BucketRegion]
+            S3Bucket: !If [UsingDefaultBucket, !Sub '${QSS3BucketName}-${AWS::Region}', !Ref QSS3BucketName]
+      Parameters:
+        SolaceDockerImage: !Ref 'SolaceDockerImage'
+        AdminPassword: !Ref 'AdminPassword'
+        ContainerLoggingFormat: !Ref 'ContainerLoggingFormat'
+        BootDiskSize: !Ref 'BootDiskSize'
+        ClusterInfoHandle: !Ref 'ClusterInfoHandle'
+        KeyPairName: !Ref 'KeyPairName'
+        NodeDesignation: monitor
+        NodeInstanceType: !Ref 'MonitorNodeInstanceType'
+        NodeSecurityGroup: !Join
+          - ','
+          - - !Ref 'SolaceInternalSecurityGroup'
+            - !Ref 'BrokerMemberNodesSecurityGroup'
+            - !Ref 'RemoteMgmtSecurityGroup'
+        ParentStackName: !Ref 'AWS::StackName'
+        PersistentStorage: '0'
+        QSS3BucketName: !Ref 'QSS3BucketName'
+        QSS3BucketRegion: !Ref 'QSS3BucketRegion'
+        QSS3KeyPrefix: !Ref 'QSS3KeyPrefix'
+        AssociatePublicIP:  !If [VPCAccessOnlyCondition, 'false', 'true']
+        SubnetID: !Select
+          - !If [Use3AZs, 2, 1]
+          - !If [UsePrivateSubnetsCondition, !Ref PrivateSubnetIDs, !Ref PublicSubnetIDs]
+  BrokerMemberNodesSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref 'VPCID'
+      GroupDescription: Internal group, includes broker node members only
+  SolaceInternalSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref 'VPCID'
+      GroupDescription: Controls internal traffic between broker member nodes
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8741
+          ToPort: 8741
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 8300
+          ToPort: 8302
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: udp
+          FromPort: 8300
+          ToPort: 8302
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 55555
+          ToPort: 55555
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 55003
+          ToPort: 55003
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 55443
+          ToPort: 55443
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 1443
+          ToPort: 1443
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 5672
+          ToPort: 5672
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 9000
+          ToPort: 9000
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 1883
+          ToPort: 1883
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 8008
+          ToPort: 8008
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 1943
+          ToPort: 1943
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: 5550
+          ToPort: 5550
+          SourceSecurityGroupId: !Ref 'BrokerMemberNodesSecurityGroup'
+  RemoteMgmtSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref 'VPCID'
+      GroupDescription: All devices external to AWS
+      SecurityGroupIngress:
+        - !If
+          - UsePrivateSubnetsCondition
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            SourceSecurityGroupId: !Ref 'SSHSecurityGroupID'
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref 'RemoteAccessCIDR'
+  EventBrokerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref 'VPCID'
+      GroupDescription: Event Broker Security Group
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5550
+          ToPort: 5550
+          CidrIp: !Ref 'VPCCIDR'
+        - IpProtocol: tcp
+          FromPort: 55555
+          ToPort: 55555
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 55003
+          ToPort: 55003
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 55443
+          ToPort: 55443
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 1443
+          ToPort: 1443
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 5672
+          ToPort: 5672
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 9000
+          ToPort: 9000
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 1883
+          ToPort: 1883
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 8008
+          ToPort: 8008
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref 'RemoteAccessCIDR'
+        - IpProtocol: tcp
+          FromPort: 1943
+          ToPort: 1943
+          CidrIp: !Ref 'RemoteAccessCIDR'
+  ClusterInfoHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+  ClusterInfoCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    Condition: EnableWaitConditions
+    DependsOn:
+      - EventBrokerPrimaryStack
+      - EventBrokerBackupStack
+      - MonitorStack
+    Properties:
+      Handle: !Ref 'ClusterInfoHandle'
+      Timeout: '600'
+      Count: 1
+  ELB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - EventBrokerPrimaryStack
+      - EventBrokerBackupStack
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Scheme: !If [VPCAccessOnlyCondition, 'internal', 'internet-facing']
+      Subnets: !If [VPCAccessOnlyCondition, !Ref 'PrivateSubnetIDs', !Ref 'PublicSubnetIDs']
+      Type: network
+  Port55555NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 55555
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 55555
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 55555
+  Port55003NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 55003
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 55003
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 55003
+  Port55443NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 55443
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 55443
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 55443
+  Port1443NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 1443
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 1443
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 1443
+  Port8000NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 8000
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 8000
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 8000
+  Port5672NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 5672
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 5672
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 5672
+  Port9000NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 9000
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 9000
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 9000
+  Port1883NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 1883
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 1883
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 1883
+  Port8008NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 8008
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 8008
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 8008
+  Port8080NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 8080
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 8080
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 8080
+  Port1943NetworkLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - ELB
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      Port: 1943
+      Protocol: TCP
+      VpcId: !Ref 'VPCID'
+      HealthCheckPath: '/health-check/guaranteed-active'
+      HealthCheckPort: '5550'
+      HealthCheckProtocol: 'HTTP'
+      Targets:
+      - Id: !GetAtt 'EventBrokerPrimaryStack.Outputs.EC2ID'
+        Port: 1943
+      - Id: !GetAtt 'EventBrokerBackupStack.Outputs.EC2ID'
+        Port: 1943
+  Port55555NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port55555NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 55555
+      Protocol: TCP
+  Port55003NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port55003NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 55003
+      Protocol: TCP
+  Port55443NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port55443NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 55443
+      Protocol: TCP
+  Port1443NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port1443NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 1443
+      Protocol: TCP
+  Port8000NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port8000NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 8000
+      Protocol: TCP
+  Port5672NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port5672NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 5672
+      Protocol: TCP
+  Port9000NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port9000NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 9000
+      Protocol: TCP
+  Port1883NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port1883NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 1883
+      Protocol: TCP
+  Port8008NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port8008NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 8008
+      Protocol: TCP
+  Port8080NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port8080NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 8080
+      Protocol: TCP
+  Port1943NetworkLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UsePrivateSubnetsCondition
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'Port1943NetworkLoadBalancerTargetGroup'
+      LoadBalancerArn: !Ref 'ELB'
+      Port: 1943
+      Protocol: TCP
+Outputs:
+  BrokerMemberNodesSecurityGroup:
+    Value: !Ref BrokerMemberNodesSecurityGroup
+    Description: Internal closed Security Group with only broker nodes as members
+    Export:
+      Name: !Sub '${AWS::StackName}-BrokerMemberNodesSecurityGroup'
+  LoadBalancerDNS:
+    Value: !If [UsePrivateSubnetsCondition, !GetAtt ELB.DNSName, 'No LB available, access EC2s through public addresses']
+    Description: The DNS name for the load balancer to access broker services
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDNS'

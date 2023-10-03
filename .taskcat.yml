@@ -1,33 +1,83 @@
 project:
-  name: cfn-sample-template
+  name: cfn-ps-solace-pubsubplus
   owner: quickstart@amazon.com
   package_lambda: false
   regions:
   - ap-northeast-1
   - ap-northeast-2
+  - ap-south-1
   - ap-southeast-1
   - ap-southeast-2
+  - ca-central-1
   - eu-central-1
   - eu-west-1
-  - sa-east-1
+  - eu-west-2
+  - eu-west-3
   - us-east-1
+  - us-east-2
   - us-west-1
   - us-west-2
+  - sa-east-1
+  s3_bucket: ''
+  parameters:
+    AdminPassword: $[alfred_genpass_10]
+    BootDiskSize: '24'
+    ContainerLoggingFormat: graylog
+    CreatePrivateSubnets: 'true'
+    KeyPairName: $[alfred_getkeypair]
+    WorkerNodeInstanceType: m4.large
+    EventBrokerNodeStorage: '0'
+    MonitorNodeInstanceType: t2.medium
+    RemoteAccessCIDR: 10.0.0.0/16
+    SSHAccessCIDR: 10.0.0.0/16
+    SolaceDockerImage: solace/solace-pubsub-standard:latest
+    QSS3BucketName: $[taskcat_autobucket]
+    QSS3BucketRegion: $[taskcat_current_region]
 tests:
-  sample:
+  2az-americas:
     parameters:
-      Param1: 'Inputs to Stack'
-      # Examples: of other taskcat dynamic input parameters for more into see http://taskcat.io
-      #
-      #      AvailabilityZones: $[taskcat_genaz_3]
-      #      ByteValue: 1
-      #      PasswordA: $[taskcat_genpass_8A]
-      #      PasswordB: $[taskcat_genpass_32S]
-      #      RandomNumber: $[taskcat_random-numbers]
-      #      RandomString: $[taskcat_random-string]
-      #      StackName: TestStack
-      #      UUID: $[taskcat_genuuid]
-      #
+      AvailabilityZones: $[alfred_genaz_2]
+      NumberOfAZs: '2'
     regions:
+    - us-west-1
+    - ca-central-1
+    s3_bucket: ''
+    template: templates/solace-master.template
+  2az-asia:
+    parameters:
+      AvailabilityZones: $[alfred_genaz_2]
+      NumberOfAZs: '2'
+    regions:
+    - ap-south-1
+    s3_bucket: ''
+    template: templates/solace-master.template
+  3az-americas:
+    parameters:
+      AvailabilityZones: $[alfred_genaz_3]
+      NumberOfAZs: '3'
+    regions:
+    - us-east-1
     - us-east-2
-    template: templates/another-workload.template.yaml
+    - us-west-2
+    s3_bucket: ''
+    template: templates/solace-master.template
+  3az-asia:
+    parameters:
+      AvailabilityZones: $[alfred_genaz_3]
+      NumberOfAZs: '3'
+    regions:
+    - ap-northeast-1
+    - ap-southeast-1
+    - ap-southeast-2
+    s3_bucket: ''
+    template: templates/solace-master.template
+  3az-europe:
+    parameters:
+      AvailabilityZones: $[alfred_genaz_3]
+      NumberOfAZs: '3'
+    regions:
+    - eu-west-1
+    - eu-west-2
+    - eu-central-1
+    s3_bucket: ''
+    template: templates/solace-master.template
